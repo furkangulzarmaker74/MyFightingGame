@@ -1,808 +1,337 @@
-import pygame
+import os
 import math
 
-pygame.init()
-
-WIDTH = 900
-HEIGHT = 600
-
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Mini Fighting Game")
-
-clock = pygame.time.Clock()
-
-# =========================
-# COLORS
-# =========================
-SKY = (80, 160, 220)
-GROUND = (65, 155, 75)
-WHITE = (255, 255, 255)
-BLACK = (20, 20, 20)
-RED = (220, 40, 40)
-DARK_RED = (90, 0, 0)
-GRAY = (70, 70, 70)
-YELLOW = (255, 220, 40)
-ORANGE = (255, 130, 20)
-
-# =========================
-# LOAD PLAYER 1
-# =========================
-player1 = pygame.image.load(
-    "/storage/emulated/0/Download/player1.png"
-).convert_alpha()
-
-player1 = pygame.transform.scale(
-    player1, (180, 270)
-)
-
-# =========================
-# LOAD PLAYER 2
-# =========================
-player2 = pygame.image.load(
-    "/storage/emulated/0/Download/player2.png"
-).convert_alpha()
-
-player2 = pygame.transform.scale(
-    player2, (180, 270)
-)
-
-# Face Player 1
-player2 = pygame.transform.flip(
-    player2, True, False
-)
-
-# =========================
-# POSITIONS
-# =========================
-p1_x = 100
-p1_y = 180
-
-p2_x = 620
-p2_y = 180
-
-# =========================
-# HEALTH
-# =========================
-p1_health = 100
-p2_health = 100
-
-# =========================
-# PLAYER 1 JUMP
-# =========================
-p1_velocity_y = 0
-gravity = 1
-jump_power = -18
-
-# =========================
-# PLAYER 1 ATTACK
-# =========================
-p1_attack = None
-p1_attack_timer = 0
-p1_attack_cooldown = 0
-
-# =========================
-# PLAYER 2 ATTACK
-# =========================
-p2_attack = None
-p2_attack_timer = 0
-p2_attack_cooldown = 0
-
-# =========================
-# HIT EFFECT
-# =========================
-hit_timer = 0
-hit_x = 0
-hit_y = 0
-
-# =========================
-# GAME
-# =========================
-game_over = False
-winner = ""
-
-# =========================
-# TOUCH BUTTONS
-# =========================
-left_button = pygame.Rect(25, 485, 90, 80)
-right_button = pygame.Rect(125, 485, 90, 80)
-
-jump_button = pygame.Rect(600, 485, 90, 80)
-
-punch_button = pygame.Rect(700, 390, 90, 80)
-kick_button = pygame.Rect(800, 485, 90, 80)
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, Rectangle, Line, Ellipse
+from kivy.core.image import Image as CoreImage
+from kivy.uix.button import Button
+from kivy.uix.label import Label
 
 
-# =========================
-# BUTTON
-# =========================
-def draw_button(rect, text):
+class FightingGame(Widget):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-    pygame.draw.rect(
-        screen,
-        GRAY,
-        rect,
-        border_radius=18
-    )
+        self.p1_x = 100
+        self.p2_x = 620
+        self.p1_y = 180
+        self.p2_y = 180
 
-    pygame.draw.rect(
-        screen,
-        WHITE,
-        rect,
-        3,
-        border_radius=18
-    )
+        self.p1_health = 100
+        self.p2_health = 100
 
-    font = pygame.font.Font(None, 28)
+        self.p1_velocity_y = 0
+        self.gravity = 1
+        self.jump_power = -18
 
-    text_image = font.render(
-        text,
-        True,
-        WHITE
-    )
+        self.p1_attack = None
+        self.p1_attack_timer = 0
+        self.p1_attack_cooldown = 0
 
-    screen.blit(
-        text_image,
-        text_image.get_rect(center=rect.center)
-    )
+        self.p2_attack = None
+        self.p2_attack_timer = 0
+        self.p2_attack_cooldown = 0
 
+        self.hit_timer = 0
+        self.hit_x = 0
+        self.hit_y = 0
 
-# =========================
-# PLAYER 1 ATTACK
-# =========================
-def player1_attack(kind):
+        self.game_over = False
+        self.winner = ""
 
-    global p1_attack
-    global p1_attack_timer
-    global p1_attack_cooldown
-    global p2_health
-    global hit_timer
-    global hit_x
-    global hit_y
+        base = os.path.dirname(os.path.abspath(__file__))
+        self.player1_path = os.path.join(base, "player1.png")
+        self.player2_path = os.path.join(base, "player2.png")
 
-    if p1_attack_cooldown > 0:
-        return
+        self.p1_texture = CoreImage(self.player1_path).texture
+        self.p2_texture = CoreImage(self.player2_path).texture
 
-    p1_attack = kind
+        self.touch_buttons = []
+        self.make_controls()
 
-    if kind == "punch":
+        Clock.schedule_interval(self.update, 1 / 60)
 
-        p1_attack_timer = 18
-        p1_attack_cooldown = 30
-        damage = 10
+    def make_controls(self):
+        # Transparent-ish mobile controls. They are real Kivy buttons,
+        # so they work with Android touch input.
+        specs = [
+            ("<", 0.02, 0.03, 0.10, 0.13, self.move_left),
+            (">", 0.13, 0.03, 0.10, 0.13, self.move_right),
+            ("JUMP", 0.66, 0.03, 0.12, 0.13, self.jump),
+            ("PUNCH", 0.77, 0.20, 0.11, 0.13, lambda *_: self.player1_attack("punch")),
+            ("KICK", 0.88, 0.03, 0.10, 0.13, lambda *_: self.player1_attack("kick")),
+        ]
 
-        attack_box = pygame.Rect(
-            p1_x + 100,
-            p1_y + 65,
-            110,
-            90
+        for text, x, y, w, h, callback in specs:
+            b = Button(text=text, size_hint=(w, h), pos_hint={"x": x, "y": y})
+            b.bind(on_press=callback)
+            self.add_widget(b)
+            self.touch_buttons.append(b)
+
+        self.restart_button = Button(
+            text="RESTART",
+            size_hint=(0.27, 0.12),
+            pos_hint={"x": 0.365, "y": 0.20},
+            opacity=0,
+            disabled=True,
         )
+        self.restart_button.bind(on_press=self.reset_game)
+        self.add_widget(self.restart_button)
 
-    else:
-
-        p1_attack_timer = 24
-        p1_attack_cooldown = 40
-        damage = 15
-
-        attack_box = pygame.Rect(
-            p1_x + 80,
-            p1_y + 145,
-            140,
-            100
+        self.result_label = Label(
+            text="",
+            font_size="55sp",
+            bold=True,
+            size_hint=(1, 0.2),
+            pos_hint={"x": 0, "y": 0.55},
+            opacity=0,
         )
+        self.add_widget(self.result_label)
 
-    enemy_box = pygame.Rect(
-        p2_x + 25,
-        p2_y + 25,
-        130,
-        240
-    )
+    def move_left(self, *_):
+        if not self.game_over:
+            self.p1_x -= 25
 
-    if attack_box.colliderect(enemy_box):
+    def move_right(self, *_):
+        if not self.game_over:
+            self.p1_x += 25
 
-        p2_health -= damage
+    def jump(self, *_):
+        if not self.game_over and self.p1_y >= 180:
+            self.p1_velocity_y = self.jump_power
 
-        hit_timer = 12
-        hit_x = p2_x + 80
-        hit_y = p2_y + 120
+    def player1_attack(self, kind):
+        if self.game_over or self.p1_attack_cooldown > 0:
+            return
 
+        self.p1_attack = kind
 
-# =========================
-# RESET
-# =========================
-def reset_game():
-
-    global p1_x, p1_y
-    global p2_x, p2_y
-    global p1_health, p2_health
-    global p1_velocity_y
-    global game_over, winner
-    global p1_attack, p1_attack_timer
-    global p1_attack_cooldown
-    global p2_attack, p2_attack_timer
-    global p2_attack_cooldown
-
-    p1_x = 100
-    p1_y = 180
-
-    p2_x = 620
-    p2_y = 180
-
-    p1_health = 100
-    p2_health = 100
-
-    p1_velocity_y = 0
-
-    p1_attack = None
-    p1_attack_timer = 0
-    p1_attack_cooldown = 0
-
-    p2_attack = None
-    p2_attack_timer = 0
-    p2_attack_cooldown = 0
-
-    game_over = False
-    winner = ""
-
-
-# =========================
-# MAIN LOOP
-# =========================
-running = True
-
-while running:
-
-    # =========================
-    # EVENTS
-    # =========================
-    for event in pygame.event.get():
-
-        if event.type == pygame.QUIT:
-            running = False
-
-        if event.type == pygame.MOUSEBUTTONDOWN:
-
-            pos = event.pos
-
-            if not game_over:
-
-                if left_button.collidepoint(pos):
-                    p1_x -= 25
-
-                elif right_button.collidepoint(pos):
-                    p1_x += 25
-
-                elif jump_button.collidepoint(pos):
-
-                    if p1_y >= 180:
-                        p1_velocity_y = jump_power
-
-                elif punch_button.collidepoint(pos):
-
-                    player1_attack("punch")
-
-                elif kick_button.collidepoint(pos):
-
-                    player1_attack("kick")
-
-            else:
-
-                restart_button = pygame.Rect(
-                    330, 350, 240, 70
-                )
-
-                if restart_button.collidepoint(pos):
-                    reset_game()
-
-    # =========================
-    # GAME
-    # =========================
-    if not game_over:
-
-        # =========================
-        # PLAYER 1 MOVEMENT
-        # =========================
-        p1_x = max(
-            0,
-            min(p1_x, WIDTH - 180)
-        )
-
-        # =========================
-        # PLAYER 1 JUMP
-        # =========================
-        p1_velocity_y += gravity
-        p1_y += p1_velocity_y
-
-        if p1_y >= 180:
-
-            p1_y = 180
-            p1_velocity_y = 0
-
-        # =========================
-        # PLAYER 1 ATTACK TIMER
-        # =========================
-        if p1_attack_cooldown > 0:
-            p1_attack_cooldown -= 1
-
-        if p1_attack_timer > 0:
-
-            p1_attack_timer -= 1
-
+        if kind == "punch":
+            self.p1_attack_timer = 18
+            self.p1_attack_cooldown = 30
+            damage = 10
+            attack_x = self.p1_x + 100
+            attack_y = self.p1_y + 65
+            attack_w = 110
+            attack_h = 90
         else:
+            self.p1_attack_timer = 24
+            self.p1_attack_cooldown = 40
+            damage = 15
+            attack_x = self.p1_x + 80
+            attack_y = self.p1_y + 145
+            attack_w = 140
+            attack_h = 100
 
-            p1_attack = None
+        if (attack_x < self.p2_x + 155 and
+                attack_x + attack_w > self.p2_x + 25 and
+                attack_y < self.p2_y + 265 and
+                attack_y + attack_h > self.p2_y + 25):
+            self.p2_health -= damage
+            self.hit_timer = 12
+            self.hit_x = self.p2_x + 80
+            self.hit_y = self.p2_y + 120
 
-        # =========================
-        # ENEMY MOVEMENT
-        # =========================
+    def reset_game(self, *_):
+        self.p1_x = 100
+        self.p1_y = 180
+        self.p2_x = 620
+        self.p2_y = 180
+        self.p1_health = 100
+        self.p2_health = 100
+        self.p1_velocity_y = 0
+        self.p1_attack = None
+        self.p1_attack_timer = 0
+        self.p1_attack_cooldown = 0
+        self.p2_attack = None
+        self.p2_attack_timer = 0
+        self.p2_attack_cooldown = 0
+        self.hit_timer = 0
+        self.game_over = False
+        self.winner = ""
+        self.result_label.opacity = 0
+        self.restart_button.opacity = 0
+        self.restart_button.disabled = True
+        self.touch_buttons_visibility(True)
 
-        distance = p1_x - p2_x
+    def touch_buttons_visibility(self, visible):
+        for b in self.touch_buttons:
+            b.disabled = not visible
+            b.opacity = 1 if visible else 0
 
-        if p2_attack is None:
+    def update(self, dt):
+        if not self.game_over:
+            self.p1_x = max(0, min(self.p1_x, 900 - 180))
 
-            if distance > 130:
-                p2_x += 2
+            self.p1_velocity_y += self.gravity
+            self.p1_y += self.p1_velocity_y
 
-            elif distance < -130:
-                p2_x -= 2
+            if self.p1_y >= 180:
+                self.p1_y = 180
+                self.p1_velocity_y = 0
 
-        p2_x = max(
-            0,
-            min(p2_x, WIDTH - 180)
-        )
+            if self.p1_attack_cooldown > 0:
+                self.p1_attack_cooldown -= 1
 
-        # =========================
-        # ENEMY ATTACK AI
-        # =========================
-
-        if p2_attack_cooldown > 0:
-            p2_attack_cooldown -= 1
-
-        # Enemy starts attack when close
-        if (
-            abs(p1_x - p2_x) < 145
-            and p2_attack is None
-            and p2_attack_cooldown == 0
-        ):
-
-            # Alternate punch and kick
-            if pygame.time.get_ticks() // 1000 % 2 == 0:
-
-                p2_attack = "punch"
-                p2_attack_timer = 18
-                p2_attack_cooldown = 50
-
+            if self.p1_attack_timer > 0:
+                self.p1_attack_timer -= 1
             else:
-
-                p2_attack = "kick"
-                p2_attack_timer = 24
-                p2_attack_cooldown = 60
-
-        # =========================
-        # ENEMY ATTACK ANIMATION
-        # =========================
-
-        if p2_attack is not None:
-
-            p2_attack_timer -= 1
-
-            # Hit near middle of animation
-            if p2_attack_timer == 9:
-
-                if abs(p1_x - p2_x) < 160:
-
-                    if p2_attack == "punch":
-
-                        p1_health -= 10
-
-                    else:
-
-                        p1_health -= 15
-
-                    hit_timer = 12
-                    hit_x = p1_x + 70
-                    hit_y = p1_y + 120
-
-            if p2_attack_timer <= 0:
-
-                p2_attack = None
-
-        # =========================
-        # HIT EFFECT
-        # =========================
-
-        if hit_timer > 0:
-            hit_timer -= 1
-
-        # =========================
-        # WIN / LOSE
-        # =========================
-
-        if p2_health <= 0:
-
-            p2_health = 0
-            game_over = True
-            winner = "YOU WIN!"
-
-        if p1_health <= 0:
-
-            p1_health = 0
-            game_over = True
-            winner = "YOU LOSE!"
-
-    # =========================
-    # BACKGROUND
-    # =========================
-
-    screen.fill(SKY)
-
-    pygame.draw.rect(
-        screen,
-        GROUND,
-        (0, 450, WIDTH, 150)
-    )
-
-    pygame.draw.line(
-        screen,
-        BLACK,
-        (0, 450),
-        (WIDTH, 450),
-        5
-    )
-
-    # =========================
-    # HEALTH BARS
-    # =========================
-
-    pygame.draw.rect(
-        screen,
-        DARK_RED,
-        (30, 25, 350, 30)
-    )
-
-    pygame.draw.rect(
-        screen,
-        RED,
-        (30, 25, int(p1_health * 3.5), 30)
-    )
-
-    pygame.draw.rect(
-        screen,
-        DARK_RED,
-        (520, 25, 350, 30)
-    )
-
-    pygame.draw.rect(
-        screen,
-        RED,
-        (520, 25, int(p2_health * 3.5), 30)
-    )
-
-    font = pygame.font.Font(None, 28)
-
-    screen.blit(
-        font.render("PLAYER 1", True, WHITE),
-        (30, 65)
-    )
-
-    screen.blit(
-        font.render("PLAYER 2", True, WHITE),
-        (520, 65)
-    )
-
-    # ==================================================
-    # PLAYER 1 ANIMATION
-    # ==================================================
-
-    p1_image = player1
-    p1_draw_x = p1_x
-
-    if p1_attack == "punch":
-
-        progress = p1_attack_timer / 18
-
-        movement = int(
-            20 * math.sin(progress * math.pi)
-        )
-
-        p1_draw_x += movement
-
-        angle = -10 * math.sin(
-            progress * math.pi
-        )
-
-        p1_image = pygame.transform.rotate(
-            player1,
-            angle
-        )
-
-    elif p1_attack == "kick":
-
-        progress = p1_attack_timer / 24
-
-        movement = int(
-            28 * math.sin(progress * math.pi)
-        )
-
-        p1_draw_x += movement
-
-        angle = 12 * math.sin(
-            progress * math.pi
-        )
-
-        p1_image = pygame.transform.rotate(
-            player1,
-            angle
-        )
-
-    screen.blit(
-        p1_image,
-        (p1_draw_x, p1_y)
-    )
-
-    # ==================================================
-    # PLAYER 2 ANIMATION
-    # ==================================================
-
-    p2_image = player2
-    p2_draw_x = p2_x
-
-    if p2_attack == "punch":
-
-        progress = p2_attack_timer / 18
-
-        movement = int(
-            25 * math.sin(progress * math.pi)
-        )
-
-        # Enemy lunges toward Player 1
-        p2_draw_x -= movement
-
-        # Enemy leans forward
-        angle = 10 * math.sin(
-            progress * math.pi
-        )
-
-        p2_image = pygame.transform.rotate(
-            player2,
-            angle
-        )
-
-    elif p2_attack == "kick":
-
-        progress = p2_attack_timer / 24
-
-        movement = int(
-            32 * math.sin(progress * math.pi)
-        )
-
-        # Enemy lunges forward
-        p2_draw_x -= movement
-
-        # Bigger kick movement
-        angle = -15 * math.sin(
-            progress * math.pi
-        )
-
-        p2_image = pygame.transform.rotate(
-            player2,
-            angle
-        )
-
-    screen.blit(
-        p2_image,
-        (p2_draw_x, p2_y)
-    )
-
-    # ==================================================
-    # PLAYER 1 ATTACK EFFECT
-    # ==================================================
-
-    if p1_attack == "punch":
-
-        progress = p1_attack_timer / 18
-
-        if progress < 0.75:
-
-            fist_x = int(p1_x + 185)
-            fist_y = int(p1_y + 105)
-
-            pygame.draw.circle(
-                screen,
-                YELLOW,
-                (fist_x, fist_y),
-                15
-            )
-
-            pygame.draw.circle(
-                screen,
-                ORANGE,
-                (fist_x, fist_y),
-                23,
-                3
-            )
-
-    if p1_attack == "kick":
-
-        progress = p1_attack_timer / 24
-
-        if progress < 0.75:
-
-            foot_x = int(p1_x + 190)
-            foot_y = int(p1_y + 200)
-
-            pygame.draw.circle(
-                screen,
-                YELLOW,
-                (foot_x, foot_y),
-                18
-            )
-
-            pygame.draw.circle(
-                screen,
-                ORANGE,
-                (foot_x, foot_y),
-                28,
-                3
-            )
-
-    # ==================================================
-    # ENEMY ATTACK EFFECT
-    # ==================================================
-
-    if p2_attack == "punch":
-
-        progress = p2_attack_timer / 18
-
-        if progress < 0.75:
-
-            fist_x = int(p2_x - 5)
-            fist_y = int(p2_y + 105)
-
-            pygame.draw.circle(
-                screen,
-                YELLOW,
-                (fist_x, fist_y),
-                15
-            )
-
-            pygame.draw.circle(
-                screen,
-                ORANGE,
-                (fist_x, fist_y),
-                23,
-                3
-            )
-
-    if p2_attack == "kick":
-
-        progress = p2_attack_timer / 24
-
-        if progress < 0.75:
-
-            foot_x = int(p2_x + 5)
-            foot_y = int(p2_y + 200)
-
-            pygame.draw.circle(
-                screen,
-                YELLOW,
-                (foot_x, foot_y),
-                18
-            )
-
-            pygame.draw.circle(
-                screen,
-                ORANGE,
-                (foot_x, foot_y),
-                28,
-                3
-            )
-
-    # ==================================================
-    # HIT EFFECT
-    # ==================================================
-
-    if hit_timer > 0:
-
-        size = 30 + (12 - hit_timer) * 3
-
-        pygame.draw.circle(
-            screen,
-            YELLOW,
-            (hit_x, hit_y),
-            size,
-            5
-        )
-
-        pygame.draw.line(
-            screen,
-            WHITE,
-            (
-                hit_x - size,
-                hit_y - size
-            ),
-            (
-                hit_x + size,
-                hit_y + size
-            ),
-            5
-        )
-
-        pygame.draw.line(
-            screen,
-            WHITE,
-            (
-                hit_x + size,
-                hit_y - size
-            ),
-            (
-                hit_x - size,
-                hit_y + size
-            ),
-            5
-        )
-
-    # ==================================================
-    # TOUCH CONTROLS
-    # ==================================================
-
-    draw_button(left_button, "<")
-    draw_button(right_button, ">")
-    draw_button(jump_button, "JUMP")
-    draw_button(punch_button, "PUNCH")
-    draw_button(kick_button, "KICK")
-
-    # ==================================================
-    # GAME OVER
-    # ==================================================
-
-    if game_over:
-
-        overlay = pygame.Surface(
-            (WIDTH, HEIGHT),
-            pygame.SRCALPHA
-        )
-
-        overlay.fill(
-            (0, 0, 0, 170)
-        )
-
-        screen.blit(
-            overlay,
-            (0, 0)
-        )
-
-        big_font = pygame.font.Font(
-            None,
-            90
-        )
-
-        result = big_font.render(
-            winner,
-            True,
-            WHITE
-        )
-
-        screen.blit(
-            result,
-            result.get_rect(
-                center=(WIDTH // 2, 220)
-            )
-        )
-
-        restart_button = pygame.Rect(
-            330,
-            350,
-            240,
-            70
-        )
-
-        draw_button(
-            restart_button,
-            "RESTART"
-        )
-
-    pygame.display.flip()
-
-    clock.tick(60)
-
-pygame.quit()
+                self.p1_attack = None
+
+            distance = self.p1_x - self.p2_x
+
+            if self.p2_attack is None:
+                if distance > 130:
+                    self.p2_x += 2
+                elif distance < -130:
+                    self.p2_x -= 2
+
+            self.p2_x = max(0, min(self.p2_x, 900 - 180))
+
+            if self.p2_attack_cooldown > 0:
+                self.p2_attack_cooldown -= 1
+
+            if abs(self.p1_x - self.p2_x) < 145 and self.p2_attack is None and self.p2_attack_cooldown == 0:
+                if int(Clock.get_time() * 1000) % 2 == 0:
+                    self.p2_attack = "punch"
+                    self.p2_attack_timer = 18
+                    self.p2_attack_cooldown = 50
+                else:
+                    self.p2_attack = "kick"
+                    self.p2_attack_timer = 24
+                    self.p2_attack_cooldown = 60
+
+            if self.p2_attack is not None:
+                self.p2_attack_timer -= 1
+
+                if self.p2_attack_timer == 9 and abs(self.p1_x - self.p2_x) < 160:
+                    self.p1_health -= 10 if self.p2_attack == "punch" else 15
+                    self.hit_timer = 12
+                    self.hit_x = self.p1_x + 70
+                    self.hit_y = self.p1_y + 120
+
+                if self.p2_attack_timer <= 0:
+                    self.p2_attack = None
+
+            if self.hit_timer > 0:
+                self.hit_timer -= 1
+
+            if self.p2_health <= 0:
+                self.p2_health = 0
+                self.game_over = True
+                self.winner = "YOU WIN!"
+            elif self.p1_health <= 0:
+                self.p1_health = 0
+                self.game_over = True
+                self.winner = "YOU LOSE!"
+
+            if self.game_over:
+                self.result_label.text = self.winner
+                self.result_label.opacity = 1
+                self.restart_button.opacity = 1
+                self.restart_button.disabled = False
+                self.touch_buttons_visibility(False)
+
+        self.draw_game()
+
+    def draw_game(self):
+        self.canvas.before.clear()
+
+        with self.canvas.before:
+            # Sky
+            Color(80 / 255, 160 / 255, 220 / 255, 1)
+            Rectangle(pos=(0, 0), size=self.size)
+
+            # Ground
+            Color(65 / 255, 155 / 255, 75 / 255, 1)
+            Rectangle(pos=(0, 0), size=(self.width, self.height * 0.25))
+
+            # Ground line
+            Color(20 / 255, 20 / 255, 20 / 255, 1)
+            Line(points=[0, self.height * 0.25, self.width, self.height * 0.25], width=3)
+
+            # Health bars
+            bar_w = self.width * 0.39
+            bar_h = self.height * 0.05
+            y = self.height * 0.90
+
+            Color(90 / 255, 0, 0, 1)
+            Rectangle(pos=(self.width * 0.03, y), size=(bar_w, bar_h))
+            Rectangle(pos=(self.width * 0.58, y), size=(bar_w, bar_h))
+
+            Color(220 / 255, 40 / 255, 40 / 255, 1)
+            Rectangle(pos=(self.width * 0.03, y), size=(bar_w * self.p1_health / 100, bar_h))
+            Rectangle(pos=(self.width * 0.58, y), size=(bar_w * self.p2_health / 100, bar_h))
+
+            # Characters
+            pw = self.width * 0.20
+            ph = self.height * 0.45
+
+            p1_draw_x = self.p1_x / 900 * self.width
+            p2_draw_x = self.p2_x / 900 * self.width
+            p1_draw_y = self.height * 0.25
+            p2_draw_y = self.height * 0.25
+
+            if self.p1_attack == "punch":
+                progress = self.p1_attack_timer / 18
+                p1_draw_x += (20 * math.sin(progress * math.pi)) / 900 * self.width
+            elif self.p1_attack == "kick":
+                progress = self.p1_attack_timer / 24
+                p1_draw_x += (28 * math.sin(progress * math.pi)) / 900 * self.width
+
+            if self.p2_attack == "punch":
+                progress = self.p2_attack_timer / 18
+                p2_draw_x -= (25 * math.sin(progress * math.pi)) / 900 * self.width
+            elif self.p2_attack == "kick":
+                progress = self.p2_attack_timer / 24
+                p2_draw_x -= (32 * math.sin(progress * math.pi)) / 900 * self.width
+
+            Rectangle(texture=self.p1_texture, pos=(p1_draw_x, p1_draw_y),
+                      size=(pw, ph))
+            Rectangle(texture=self.p2_texture, pos=(p2_draw_x, p2_draw_y),
+                      size=(pw, ph))
+
+            # Attack effects
+            if self.p1_attack == "punch" and self.p1_attack_timer / 18 < 0.75:
+                fx = p1_draw_x + pw * 1.03
+                fy = p1_draw_y + ph * 0.39
+                Color(1, 220 / 255, 40 / 255, 1)
+                Ellipse(pos=(fx, fy), size=(22, 22))
+            elif self.p1_attack == "kick" and self.p1_attack_timer / 24 < 0.75:
+                fx = p1_draw_x + pw * 1.06
+                fy = p1_draw_y + ph * 0.72
+                Color(1, 220 / 255, 40 / 255, 1)
+                Ellipse(pos=(fx, fy), size=(26, 26))
+
+            if self.p2_attack == "punch" and self.p2_attack_timer / 18 < 0.75:
+                fx = p2_draw_x - 8
+                fy = p2_draw_y + ph * 0.39
+                Color(1, 220 / 255, 40 / 255, 1)
+                Ellipse(pos=(fx, fy), size=(22, 22))
+            elif self.p2_attack == "kick" and self.p2_attack_timer / 24 < 0.75:
+                fx = p2_draw_x - 8
+                fy = p2_draw_y + ph * 0.72
+                Color(1, 220 / 255, 40 / 255, 1)
+                Ellipse(pos=(fx, fy), size=(26, 26))
+
+            # Hit effect
+            if self.hit_timer > 0:
+                size = 30 + (12 - self.hit_timer) * 3
+                hx = self.hit_x / 900 * self.width
+                hy = self.height * 0.25 + (self.hit_y - 180) / 420 * self.height * 0.45
+                Color(1, 220 / 255, 40 / 255, 1)
+                Line(circle=(hx, hy, size), width=3)
+                Line(points=[hx-size, hy-size, hx+size, hy+size], width=3)
+                Line(points=[hx+size, hy-size, hx-size, hy+size], width=3)
+
+
+class FightingApp(App):
+    def build(self):
+        self.title = "My Fighting Game"
+        return FightingGame()
+
+
+if __name__ == "__main__":
+    FightingApp().run()
