@@ -9,7 +9,7 @@ source.include_exts = py,png,jpg,jpeg,wav,mp3
 
 version = 1.0
 
-requirements = python3,kivy
+requirements = python3,kivy,charset-normalizer==2.1.1
 
 orientation = landscape
 fullscreen = 1
